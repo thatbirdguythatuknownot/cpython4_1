@@ -64,6 +64,7 @@ struct ast_state {
     PyObject *FunctionType_type;
     PyObject *GeneratorExp_type;
     PyObject *Global_type;
+    PyObject *Goto_type;
     PyObject *GtE_singleton;
     PyObject *GtE_type;
     PyObject *Gt_singleton;
@@ -84,6 +85,7 @@ struct ast_state {
     PyObject *JoinedStr_type;
     PyObject *LShift_singleton;
     PyObject *LShift_type;
+    PyObject *Label_type;
     PyObject *Lambda_type;
     PyObject *ListComp_type;
     PyObject *List_type;

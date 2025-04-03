@@ -85,6 +85,15 @@ struct symtable {
                                        the symbol table */
 };
 
+typedef struct _symtable_fblock {
+    PyObject_HEAD
+    PyObject *f_id;   /* int: key in ste->ste_labels */
+    PyObject *f_map;  /* dict: label names to jump ids (in codegen) */
+    struct _symtable_entry *f_entry;
+} PySTFBlockObject;
+
+extern PyTypeObject PySTFBlock_Type;
+
 typedef struct _symtable_entry {
     PyObject_HEAD
     PyObject *ste_id;        /* int: key in ste_table->st_blocks */
@@ -94,6 +103,8 @@ typedef struct _symtable_entry {
     PyObject *ste_children;  /* list of child blocks */
     PyObject *ste_directives;/* locations of global and nonlocal statements */
     PyObject *ste_mangled_names; /* set of names for which mangling should be applied */
+    PyObject *ste_labels;    /* dict: map of AST node addresses to fblocks */
+    PySTFBlockObject *ste_curfblock; /* current symtable fblock */
 
     _Py_block_ty ste_type;
     // Optional string set by symtable.c and used when reporting errors.
