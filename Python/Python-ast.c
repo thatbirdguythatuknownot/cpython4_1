@@ -81,6 +81,7 @@ void _PyAST_Fini(PyInterpreterState *interp)
     Py_CLEAR(state->FunctionType_type);
     Py_CLEAR(state->GeneratorExp_type);
     Py_CLEAR(state->Global_type);
+    Py_CLEAR(state->Goto_type);
     Py_CLEAR(state->GtE_singleton);
     Py_CLEAR(state->GtE_type);
     Py_CLEAR(state->Gt_singleton);
@@ -101,6 +102,7 @@ void _PyAST_Fini(PyInterpreterState *interp)
     Py_CLEAR(state->JoinedStr_type);
     Py_CLEAR(state->LShift_singleton);
     Py_CLEAR(state->LShift_type);
+    Py_CLEAR(state->Label_type);
     Py_CLEAR(state->Lambda_type);
     Py_CLEAR(state->ListComp_type);
     Py_CLEAR(state->List_type);
@@ -520,6 +522,12 @@ static const char * const TryStar_fields[]={
 static const char * const Assert_fields[]={
     "test",
     "msg",
+};
+static const char * const Goto_fields[]={
+    "name",
+};
+static const char * const Label_fields[]={
+    "names",
 };
 static const char * const Import_fields[]={
     "names",
@@ -2224,6 +2232,61 @@ add_ast_annotations(struct ast_state *state)
         return 0;
     }
     Py_DECREF(Assert_annotations);
+    PyObject *Goto_annotations = PyDict_New();
+    if (!Goto_annotations) return 0;
+    {
+        PyObject *type = (PyObject *)&PyUnicode_Type;
+        Py_INCREF(type);
+        cond = PyDict_SetItemString(Goto_annotations, "name", type) == 0;
+        Py_DECREF(type);
+        if (!cond) {
+            Py_DECREF(Goto_annotations);
+            return 0;
+        }
+    }
+    cond = PyObject_SetAttrString(state->Goto_type, "_field_types",
+                                  Goto_annotations) == 0;
+    if (!cond) {
+        Py_DECREF(Goto_annotations);
+        return 0;
+    }
+    cond = PyObject_SetAttrString(state->Goto_type, "__annotations__",
+                                  Goto_annotations) == 0;
+    if (!cond) {
+        Py_DECREF(Goto_annotations);
+        return 0;
+    }
+    Py_DECREF(Goto_annotations);
+    PyObject *Label_annotations = PyDict_New();
+    if (!Label_annotations) return 0;
+    {
+        PyObject *type = (PyObject *)&PyUnicode_Type;
+        type = Py_GenericAlias((PyObject *)&PyList_Type, type);
+        cond = type != NULL;
+        if (!cond) {
+            Py_DECREF(Label_annotations);
+            return 0;
+        }
+        cond = PyDict_SetItemString(Label_annotations, "names", type) == 0;
+        Py_DECREF(type);
+        if (!cond) {
+            Py_DECREF(Label_annotations);
+            return 0;
+        }
+    }
+    cond = PyObject_SetAttrString(state->Label_type, "_field_types",
+                                  Label_annotations) == 0;
+    if (!cond) {
+        Py_DECREF(Label_annotations);
+        return 0;
+    }
+    cond = PyObject_SetAttrString(state->Label_type, "__annotations__",
+                                  Label_annotations) == 0;
+    if (!cond) {
+        Py_DECREF(Label_annotations);
+        return 0;
+    }
+    Py_DECREF(Label_annotations);
     PyObject *Import_annotations = PyDict_New();
     if (!Import_annotations) return 0;
     {
@@ -6084,6 +6147,8 @@ init_types(void *arg)
         "     | Try(stmt* body, excepthandler* handlers, stmt* orelse, stmt* finalbody)\n"
         "     | TryStar(stmt* body, excepthandler* handlers, stmt* orelse, stmt* finalbody)\n"
         "     | Assert(expr test, expr? msg)\n"
+        "     | Goto(identifier name)\n"
+        "     | Label(identifier* names)\n"
         "     | Import(alias* names)\n"
         "     | ImportFrom(identifier? module, alias* names, int? level)\n"
         "     | Global(identifier* names)\n"
@@ -6213,6 +6278,14 @@ init_types(void *arg)
     if (!state->Assert_type) return -1;
     if (PyObject_SetAttr(state->Assert_type, state->msg, Py_None) == -1)
         return -1;
+    state->Goto_type = make_type(state, "Goto", state->stmt_type, Goto_fields,
+                                 1,
+        "Goto(identifier name)");
+    if (!state->Goto_type) return -1;
+    state->Label_type = make_type(state, "Label", state->stmt_type,
+                                  Label_fields, 1,
+        "Label(identifier* names)");
+    if (!state->Label_type) return -1;
     state->Import_type = make_type(state, "Import", state->stmt_type,
                                    Import_fields, 1,
         "Import(alias* names)");
@@ -7442,6 +7515,45 @@ _PyAST_Assert(expr_ty test, expr_ty msg, int lineno, int col_offset, int
     p->kind = Assert_kind;
     p->v.Assert.test = test;
     p->v.Assert.msg = msg;
+    p->lineno = lineno;
+    p->col_offset = col_offset;
+    p->end_lineno = end_lineno;
+    p->end_col_offset = end_col_offset;
+    return p;
+}
+
+stmt_ty
+_PyAST_Goto(identifier name, int lineno, int col_offset, int end_lineno, int
+            end_col_offset, PyArena *arena)
+{
+    stmt_ty p;
+    if (!name) {
+        PyErr_SetString(PyExc_ValueError,
+                        "field 'name' is required for Goto");
+        return NULL;
+    }
+    p = (stmt_ty)_PyArena_Malloc(arena, sizeof(*p));
+    if (!p)
+        return NULL;
+    p->kind = Goto_kind;
+    p->v.Goto.name = name;
+    p->lineno = lineno;
+    p->col_offset = col_offset;
+    p->end_lineno = end_lineno;
+    p->end_col_offset = end_col_offset;
+    return p;
+}
+
+stmt_ty
+_PyAST_Label(asdl_identifier_seq * names, int lineno, int col_offset, int
+             end_lineno, int end_col_offset, PyArena *arena)
+{
+    stmt_ty p;
+    p = (stmt_ty)_PyArena_Malloc(arena, sizeof(*p));
+    if (!p)
+        return NULL;
+    p->kind = Label_kind;
+    p->v.Label.names = names;
     p->lineno = lineno;
     p->col_offset = col_offset;
     p->end_lineno = end_lineno;
@@ -9256,6 +9368,27 @@ ast2obj_stmt(struct ast_state *state, void* _o)
         value = ast2obj_expr(state, o->v.Assert.msg);
         if (!value) goto failed;
         if (PyObject_SetAttr(result, state->msg, value) == -1)
+            goto failed;
+        Py_DECREF(value);
+        break;
+    case Goto_kind:
+        tp = (PyTypeObject *)state->Goto_type;
+        result = PyType_GenericNew(tp, NULL, NULL);
+        if (!result) goto failed;
+        value = ast2obj_identifier(state, o->v.Goto.name);
+        if (!value) goto failed;
+        if (PyObject_SetAttr(result, state->name, value) == -1)
+            goto failed;
+        Py_DECREF(value);
+        break;
+    case Label_kind:
+        tp = (PyTypeObject *)state->Label_type;
+        result = PyType_GenericNew(tp, NULL, NULL);
+        if (!result) goto failed;
+        value = ast2obj_list(state, (asdl_seq*)o->v.Label.names,
+                             ast2obj_identifier);
+        if (!value) goto failed;
+        if (PyObject_SetAttr(result, state->names, value) == -1)
             goto failed;
         Py_DECREF(value);
         break;
@@ -13239,6 +13372,87 @@ obj2ast_stmt(struct ast_state *state, PyObject* obj, stmt_ty* out, PyArena*
         }
         *out = _PyAST_Assert(test, msg, lineno, col_offset, end_lineno,
                              end_col_offset, arena);
+        if (*out == NULL) goto failed;
+        return 0;
+    }
+    tp = state->Goto_type;
+    isinstance = PyObject_IsInstance(obj, tp);
+    if (isinstance == -1) {
+        return -1;
+    }
+    if (isinstance) {
+        identifier name;
+
+        if (PyObject_GetOptionalAttr(obj, state->name, &tmp) < 0) {
+            return -1;
+        }
+        if (tmp == NULL) {
+            PyErr_SetString(PyExc_TypeError, "required field \"name\" missing from Goto");
+            return -1;
+        }
+        else {
+            int res;
+            if (_Py_EnterRecursiveCall(" while traversing 'Goto' node")) {
+                goto failed;
+            }
+            res = obj2ast_identifier(state, tmp, &name, arena);
+            _Py_LeaveRecursiveCall();
+            if (res != 0) goto failed;
+            Py_CLEAR(tmp);
+        }
+        *out = _PyAST_Goto(name, lineno, col_offset, end_lineno,
+                           end_col_offset, arena);
+        if (*out == NULL) goto failed;
+        return 0;
+    }
+    tp = state->Label_type;
+    isinstance = PyObject_IsInstance(obj, tp);
+    if (isinstance == -1) {
+        return -1;
+    }
+    if (isinstance) {
+        asdl_identifier_seq* names;
+
+        if (PyObject_GetOptionalAttr(obj, state->names, &tmp) < 0) {
+            return -1;
+        }
+        if (tmp == NULL) {
+            tmp = PyList_New(0);
+            if (tmp == NULL) {
+                return -1;
+            }
+        }
+        {
+            int res;
+            Py_ssize_t len;
+            Py_ssize_t i;
+            if (!PyList_Check(tmp)) {
+                PyErr_Format(PyExc_TypeError, "Label field \"names\" must be a list, not a %.200s", _PyType_Name(Py_TYPE(tmp)));
+                goto failed;
+            }
+            len = PyList_GET_SIZE(tmp);
+            names = _Py_asdl_identifier_seq_new(len, arena);
+            if (names == NULL) goto failed;
+            for (i = 0; i < len; i++) {
+                identifier val;
+                PyObject *tmp2 = Py_NewRef(PyList_GET_ITEM(tmp, i));
+                if (_Py_EnterRecursiveCall(" while traversing 'Label' node")) {
+                    goto failed;
+                }
+                res = obj2ast_identifier(state, tmp2, &val, arena);
+                _Py_LeaveRecursiveCall();
+                Py_DECREF(tmp2);
+                if (res != 0) goto failed;
+                if (len != PyList_GET_SIZE(tmp)) {
+                    PyErr_SetString(PyExc_RuntimeError, "Label field \"names\" changed size during iteration");
+                    goto failed;
+                }
+                asdl_seq_SET(names, i, val);
+            }
+            Py_CLEAR(tmp);
+        }
+        *out = _PyAST_Label(names, lineno, col_offset, end_lineno,
+                            end_col_offset, arena);
         if (*out == NULL) goto failed;
         return 0;
     }
@@ -17709,6 +17923,12 @@ astmodule_exec(PyObject *m)
         return -1;
     }
     if (PyModule_AddObjectRef(m, "Assert", state->Assert_type) < 0) {
+        return -1;
+    }
+    if (PyModule_AddObjectRef(m, "Goto", state->Goto_type) < 0) {
+        return -1;
+    }
+    if (PyModule_AddObjectRef(m, "Label", state->Label_type) < 0) {
         return -1;
     }
     if (PyModule_AddObjectRef(m, "Import", state->Import_type) < 0) {

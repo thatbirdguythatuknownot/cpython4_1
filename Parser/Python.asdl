@@ -44,6 +44,8 @@ module Python
           | Try(stmt* body, excepthandler* handlers, stmt* orelse, stmt* finalbody)
           | TryStar(stmt* body, excepthandler* handlers, stmt* orelse, stmt* finalbody)
           | Assert(expr test, expr? msg)
+          | Goto(identifier name)
+          | Label(identifier* names)
 
           | Import(alias* names)
           | ImportFrom(identifier? module, alias* names, int? level)

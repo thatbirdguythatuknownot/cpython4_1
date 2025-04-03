@@ -113,6 +113,7 @@ simple_stmts[asdl_stmt_seq*]:
 simple_stmt[stmt_ty] (memo):
     | assignment
     | &"type" type_alias
+    | &"label" label_stmt
     | e=star_expressions { _PyAST_Expr(e, EXTRA) }
     | &'return' return_stmt
     | &('import' | 'from') import_stmt
@@ -125,6 +126,7 @@ simple_stmt[stmt_ty] (memo):
     | &'continue' continue_stmt
     | &'global' global_stmt
     | &'nonlocal' nonlocal_stmt
+    | &'goto' goto_stmt
 
 compound_stmt[stmt_ty]:
     | &('def' | '@' | 'async') function_def
@@ -203,6 +205,11 @@ del_stmt[stmt_ty]:
 yield_stmt[stmt_ty]: y=yield_expr { _PyAST_Expr(y, EXTRA) }
 
 assert_stmt[stmt_ty]: 'assert' a=expression b=[',' z=expression { z }] { _PyAST_Assert(a, b, EXTRA) }
+
+goto_stmt[stmt_ty]: 'goto' a=NAME { _PyAST_Goto(a->v.Name.id, EXTRA) }
+
+label_stmt[stmt_ty]: "label" a[asdl_expr_seq*]=','.NAME+ {
+    _PyAST_Label(CHECK(asdl_identifier_seq*, _PyPegen_map_names_to_ids(p, a)), EXTRA) }
 
 import_stmt[stmt_ty]:
     | invalid_import

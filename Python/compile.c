@@ -748,7 +748,7 @@ _PyCompile_ExitScope(compiler *c)
  */
 
 int
-_PyCompile_PushFBlock(compiler *c, location loc,
+_PyCompile_PushFBlock(compiler *c, stmt_ty s, location loc,
                      fblocktype t, jump_target_label block_label,
                      jump_target_label exit, void *datum)
 {
@@ -761,7 +761,25 @@ _PyCompile_PushFBlock(compiler *c, location loc,
     f->fb_block = block_label;
     f->fb_loc = loc;
     f->fb_exit = exit;
+    if (s && c->u->u_ste->ste_labels) {
+        f->fb_key = PyLong_FromVoidPtr(s);
+        if (f->fb_key == NULL) {
+            return ERROR;
+        }
+    }
+    else {
+        f->fb_key = NULL;
+    }
     f->fb_datum = datum;
+    return SUCCESS;
+}
+
+int
+_PyCompile_PushFBlockCopy(compiler *c, fblockinfo *copy)
+{
+    assert(c->u->u_nfblocks < CO_MAXBLOCKS);
+    Py_XINCREF(copy->fb_key);
+    c->u->u_fblock[c->u->u_nfblocks++] = *copy;
     return SUCCESS;
 }
 
@@ -773,6 +791,7 @@ _PyCompile_PopFBlock(compiler *c, fblocktype t, jump_target_label block_label)
     u->u_nfblocks--;
     assert(u->u_fblock[u->u_nfblocks].fb_type == t);
     assert(SAME_JUMP_TARGET_LABEL(u->u_fblock[u->u_nfblocks].fb_block, block_label));
+    Py_XDECREF(u->u_fblock[u->u_nfblocks].fb_key);
 }
 
 fblockinfo *

@@ -786,6 +786,8 @@ astfold_stmt(stmt_ty node_, PyArena *ctx_, _PyASTOptimizeState *state)
         BEFORE_LOOP_EXIT(state, node_, "continue");
         break;
     // The following statements don't contain any subexpressions to be folded
+    case Label_kind:
+    case Goto_kind:
     case Import_kind:
     case ImportFrom_kind:
     case Global_kind:

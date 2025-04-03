@@ -114,15 +114,19 @@ typedef struct {
     _Py_SourceLocation fb_loc;
     /* (optional) type-specific exit or cleanup block */
     _PyJumpTargetLabel fb_exit;
+    /* (optional) AST node address as a key to the symtable entry labels */
+    PyObject *fb_key;
     /* (optional) additional information required for unwinding */
     void *fb_datum;
 } _PyCompile_FBlockInfo;
 
 
-int _PyCompile_PushFBlock(struct _PyCompiler *c, _Py_SourceLocation loc,
+int _PyCompile_PushFBlock(struct _PyCompiler *c, stmt_ty s,
+                          _Py_SourceLocation loc,
                           enum _PyCompile_FBlockType t,
                           _PyJumpTargetLabel block_label,
                           _PyJumpTargetLabel exit, void *datum);
+int _PyCompile_PushFBlockCopy(struct _PyCompiler *c, _PyCompile_FBlockInfo *copy);
 void _PyCompile_PopFBlock(struct _PyCompiler *c, enum _PyCompile_FBlockType t,
                           _PyJumpTargetLabel block_label);
 _PyCompile_FBlockInfo *_PyCompile_TopFBlock(struct _PyCompiler *c);

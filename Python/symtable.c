@@ -116,6 +116,9 @@ ste_new(struct symtable *st, identifier name, _Py_block_ty block,
     ste->ste_directives = NULL;
     ste->ste_mangled_names = NULL;
 
+    ste->ste_labels = NULL;
+    ste->ste_curfblock = NULL;
+
     ste->ste_type = block;
     ste->ste_scope_info = NULL;
 
@@ -191,6 +194,7 @@ ste_dealloc(PyObject *op)
     Py_XDECREF(ste->ste_directives);
     Py_XDECREF(ste->ste_annotation_block);
     Py_XDECREF(ste->ste_mangled_names);
+    Py_XDECREF(ste->ste_labels);
     PyObject_Free(ste);
 }
 
@@ -248,6 +252,119 @@ PyTypeObject PySTEntry_Type = {
     0,                                          /* tp_alloc */
     0,                                          /* tp_new */
 };
+
+static PySTFBlockObject*
+fblock_new(PySTEntryObject *ste, void *key)
+{
+    PySTFBlockObject *fblock = NULL;
+    PyObject *k = NULL;
+
+    if ((void *)ste == key) {
+        k = Py_NewRef(ste->ste_id);
+    }
+    else {
+        k = PyLong_FromVoidPtr(key);
+        if (k == NULL)
+            goto fail;
+    }
+    fblock = PyObject_New(PySTFBlockObject, &PySTFBlock_Type);
+    if (fblock == NULL) {
+        Py_DECREF(k);
+        goto fail;
+    }
+    fblock->f_entry = ste;
+    fblock->f_id = k; /* fblock owns reference to k */
+
+    fblock->f_map = NULL;
+
+    return fblock;
+ fail:
+    Py_XDECREF(fblock);
+    return NULL;
+}
+
+static PyObject *
+fblock_repr(PyObject *op)
+{
+    PySTFBlockObject *fblock = (PySTFBlockObject *)op;
+    return PyUnicode_FromFormat("<symtable fblock (%R)>", fblock->f_id);
+}
+
+static void
+fblock_dealloc(PyObject *op)
+{
+    PySTFBlockObject *fblock = (PySTFBlockObject *)op;
+    fblock->f_entry = NULL;
+    Py_DECREF(fblock->f_id);
+    Py_XDECREF(fblock->f_map);
+    PyObject_Free(fblock);
+}
+
+static PyMemberDef fblock_memberlist[] = {
+    {"id",  _Py_T_OBJECT, offsetof(PySTFBlockObject, f_id), Py_READONLY},
+    {"map", _Py_T_OBJECT, offsetof(PySTFBlockObject, f_map), Py_READONLY},
+    {NULL}
+};
+
+PyTypeObject PySTFBlock_Type = {
+    PyVarObject_HEAD_INIT(&PyType_Type, 0)
+    .tp_name = "symtable fblock",
+    .tp_basicsize = sizeof(PySTFBlockObject),
+    .tp_itemsize = 0,
+    .tp_dealloc = fblock_dealloc,
+    .tp_repr = fblock_repr,
+    .tp_getattro = PyObject_GenericGetAttr,
+    .tp_flags = Py_TPFLAGS_DEFAULT,
+    .tp_members = fblock_memberlist,
+};
+
+static int
+add_fblock_to_ste(PySTEntryObject *ste, PySTFBlockObject *fblock)
+{
+    if (ste->ste_labels == NULL) {
+        ste->ste_labels = PyDict_New();
+        if (!ste->ste_labels) {
+            Py_DECREF(fblock);
+            return 0;
+        }
+    }
+    if (PyDict_SetItem(ste->ste_labels, fblock->f_id, (PyObject *)fblock) < 0) {
+        Py_DECREF(fblock);
+        return 0;
+    }
+    return 1;
+}
+
+static int
+new_fblock_label(PySTEntryObject *ste, identifier name)
+{
+    PySTFBlockObject *fblock = ste->ste_curfblock;
+    if (!fblock) {
+        fblock = fblock_new(ste, ste);
+        if (!fblock) {
+            return 0;
+        }
+        if (!add_fblock_to_ste(ste, fblock)) {
+            return 0;
+        }
+        ste->ste_curfblock = fblock;
+    }
+
+    if (!fblock->f_map) {
+        fblock->f_map = PyDict_New();
+        if (!fblock->f_map) {
+            return 0;
+        }
+    }
+
+    PyObject *val = PyLong_FromLong(-1);
+    if (!val) {
+        return 0;
+    }
+    int res = PyDict_SetItem(fblock->f_map, name, val);
+    Py_DECREF(val);
+    return res == 0;
+}
 
 static int symtable_analyze(struct symtable *st);
 static int symtable_enter_block(struct symtable *st, identifier name,
@@ -1747,6 +1864,20 @@ symtable_enter_type_param_block(struct symtable *st, identifier name,
 #define LEAVE_CONDITIONAL_BLOCK(ST) \
     (ST)->st_cur->ste_in_conditional_block = in_conditional_block;
 
+#define ENTER_FBLOCK(ST, S) \
+    PySTFBlockObject *fblock = fblock_new((ST)->st_cur, (S)); \
+    if (!fblock) { \
+        return 0; \
+    } \
+    PySTFBlockObject *old_fblock = (ST)->st_cur->ste_curfblock; \
+    (ST)->st_cur->ste_curfblock = fblock;
+
+#define LEAVE_FBLOCK(ST) \
+    if (fblock->f_map) { \
+        add_fblock_to_ste((ST)->st_cur, fblock); \
+    } \
+    (ST)->st_cur->ste_curfblock = old_fblock;
+
 #define ENTER_RECURSIVE() \
 if (Py_EnterRecursiveCall(" during compilation")) { \
     return 0; \
@@ -2033,11 +2164,13 @@ symtable_visit_stmt(struct symtable *st, stmt_ty s)
     case For_kind: {
         VISIT(st, expr, s->v.For.target);
         VISIT(st, expr, s->v.For.iter);
+        ENTER_FBLOCK(st, s);
         ENTER_CONDITIONAL_BLOCK(st);
         VISIT_SEQ(st, stmt, s->v.For.body);
         if (s->v.For.orelse)
             VISIT_SEQ(st, stmt, s->v.For.orelse);
         LEAVE_CONDITIONAL_BLOCK(st);
+        LEAVE_FBLOCK(st);
         break;
     }
     case While_kind: {
@@ -2075,21 +2208,25 @@ symtable_visit_stmt(struct symtable *st, stmt_ty s)
         }
         break;
     case Try_kind: {
+        ENTER_FBLOCK(st, s);
         ENTER_CONDITIONAL_BLOCK(st);
         VISIT_SEQ(st, stmt, s->v.Try.body);
         VISIT_SEQ(st, excepthandler, s->v.Try.handlers);
         VISIT_SEQ(st, stmt, s->v.Try.orelse);
         VISIT_SEQ(st, stmt, s->v.Try.finalbody);
         LEAVE_CONDITIONAL_BLOCK(st);
+        LEAVE_FBLOCK(st);
         break;
     }
     case TryStar_kind: {
+        ENTER_FBLOCK(st, s);
         ENTER_CONDITIONAL_BLOCK(st);
         VISIT_SEQ(st, stmt, s->v.TryStar.body);
         VISIT_SEQ(st, excepthandler, s->v.TryStar.handlers);
         VISIT_SEQ(st, stmt, s->v.TryStar.orelse);
         VISIT_SEQ(st, stmt, s->v.TryStar.finalbody);
         LEAVE_CONDITIONAL_BLOCK(st);
+        LEAVE_FBLOCK(st);
         break;
     }
     case Assert_kind:
@@ -2173,16 +2310,30 @@ symtable_visit_stmt(struct symtable *st, stmt_ty s)
     case Expr_kind:
         VISIT(st, expr, s->v.Expr.value);
         break;
+    case Label_kind: {
+        Py_ssize_t i;
+        asdl_identifier_seq *seq = s->v.Label.names;
+        for (i = 0; i < asdl_seq_LEN(seq); i++) {
+            if (!new_fblock_label(st->st_cur, asdl_seq_GET(seq, i))) {
+                return 0;
+            }
+        }
+        break;
+    }
+    case Goto_kind:
+        /* this is checked later in codegen */
     case Pass_kind:
     case Break_kind:
     case Continue_kind:
         /* nothing to do here */
         break;
     case With_kind: {
+        ENTER_FBLOCK(st, s);
         ENTER_CONDITIONAL_BLOCK(st);
         VISIT_SEQ(st, withitem, s->v.With.items);
         VISIT_SEQ(st, stmt, s->v.With.body);
         LEAVE_CONDITIONAL_BLOCK(st);
+        LEAVE_FBLOCK(st);
         break;
     }
     case AsyncFunctionDef_kind: {
@@ -2245,10 +2396,12 @@ symtable_visit_stmt(struct symtable *st, stmt_ty s)
         if (!symtable_raise_if_not_coroutine(st, ASYNC_WITH_OUTSIDE_ASYNC_FUNC, LOCATION(s))) {
             return 0;
         }
+        ENTER_FBLOCK(st, s);
         ENTER_CONDITIONAL_BLOCK(st);
         VISIT_SEQ(st, withitem, s->v.AsyncWith.items);
         VISIT_SEQ(st, stmt, s->v.AsyncWith.body);
         LEAVE_CONDITIONAL_BLOCK(st);
+        LEAVE_FBLOCK(st);
         break;
     }
     case AsyncFor_kind: {
@@ -2258,11 +2411,13 @@ symtable_visit_stmt(struct symtable *st, stmt_ty s)
         }
         VISIT(st, expr, s->v.AsyncFor.target);
         VISIT(st, expr, s->v.AsyncFor.iter);
+        ENTER_FBLOCK(st, s);
         ENTER_CONDITIONAL_BLOCK(st);
         VISIT_SEQ(st, stmt, s->v.AsyncFor.body);
         if (s->v.AsyncFor.orelse)
             VISIT_SEQ(st, stmt, s->v.AsyncFor.orelse);
         LEAVE_CONDITIONAL_BLOCK(st);
+        LEAVE_FBLOCK(st);
         break;
     }
     }

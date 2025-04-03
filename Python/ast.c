@@ -922,6 +922,8 @@ validate_stmt(stmt_ty stmt)
             (!stmt->v.AsyncFunctionDef.returns ||
              validate_expr(stmt->v.AsyncFunctionDef.returns, Load));
         break;
+    case Label_kind:
+    case Goto_kind:
     case Pass_kind:
     case Break_kind:
     case Continue_kind:

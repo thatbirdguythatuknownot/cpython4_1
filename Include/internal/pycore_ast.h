@@ -190,9 +190,9 @@ enum _stmt_kind {FunctionDef_kind=1, AsyncFunctionDef_kind=2, ClassDef_kind=3,
                   For_kind=10, AsyncFor_kind=11, While_kind=12, If_kind=13,
                   With_kind=14, AsyncWith_kind=15, Match_kind=16,
                   Raise_kind=17, Try_kind=18, TryStar_kind=19, Assert_kind=20,
-                  Import_kind=21, ImportFrom_kind=22, Global_kind=23,
-                  Nonlocal_kind=24, Expr_kind=25, Pass_kind=26, Break_kind=27,
-                  Continue_kind=28};
+                  Goto_kind=21, Label_kind=22, Import_kind=23,
+                  ImportFrom_kind=24, Global_kind=25, Nonlocal_kind=26,
+                  Expr_kind=27, Pass_kind=28, Break_kind=29, Continue_kind=30};
 struct _stmt {
     enum _stmt_kind kind;
     union {
@@ -326,6 +326,14 @@ struct _stmt {
             expr_ty test;
             expr_ty msg;
         } Assert;
+
+        struct {
+            identifier name;
+        } Goto;
+
+        struct {
+            asdl_identifier_seq *names;
+        } Label;
 
         struct {
             asdl_alias_seq *names;
@@ -752,6 +760,10 @@ stmt_ty _PyAST_TryStar(asdl_stmt_seq * body, asdl_excepthandler_seq * handlers,
                        end_col_offset, PyArena *arena);
 stmt_ty _PyAST_Assert(expr_ty test, expr_ty msg, int lineno, int col_offset,
                       int end_lineno, int end_col_offset, PyArena *arena);
+stmt_ty _PyAST_Goto(identifier name, int lineno, int col_offset, int
+                    end_lineno, int end_col_offset, PyArena *arena);
+stmt_ty _PyAST_Label(asdl_identifier_seq * names, int lineno, int col_offset,
+                     int end_lineno, int end_col_offset, PyArena *arena);
 stmt_ty _PyAST_Import(asdl_alias_seq * names, int lineno, int col_offset, int
                       end_lineno, int end_col_offset, PyArena *arena);
 stmt_ty _PyAST_ImportFrom(identifier module, asdl_alias_seq * names, int level,
