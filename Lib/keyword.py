@@ -56,6 +56,8 @@ kwlist = [
 softkwlist = [
     '_',
     'case',
+    'goto',
+    'label',
     'match',
     'type'
 ]
