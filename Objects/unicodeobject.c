@@ -3128,7 +3128,7 @@ unicode_fromformat_arg(_PyUnicodeWriter *writer,
 
         PyObject *type_name;
         if (flags & F_ALT) {
-            type_name = _PyType_GetFullyQualifiedName(type, ':');
+            type_name = _PyType_GetFullyQualifiedName(type, ':', NULL);
         }
         else {
             type_name = PyType_GetFullyQualifiedName(type);
@@ -3160,7 +3160,7 @@ unicode_fromformat_arg(_PyUnicodeWriter *writer,
 
         PyObject *type_name;
         if (flags & F_ALT) {
-            type_name = _PyType_GetFullyQualifiedName(type, ':');
+            type_name = _PyType_GetFullyQualifiedName(type, ':', NULL);
         }
         else {
             type_name = PyType_GetFullyQualifiedName(type);

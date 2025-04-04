@@ -43,7 +43,6 @@ struct _Py_global_strings {
         STRUCT_FOR_STR(dbl_open_br, "{{")
         STRUCT_FOR_STR(dbl_percent, "%%")
         STRUCT_FOR_STR(defaults, ".defaults")
-        STRUCT_FOR_STR(dot_locals, ".<locals>")
         STRUCT_FOR_STR(empty, "")
         STRUCT_FOR_STR(format, ".format")
         STRUCT_FOR_STR(generic_base, ".generic_base")

@@ -11,6 +11,7 @@
 #include "pycore_object_deferred.h" // _PyObject_SetDeferredRefcount()
 #include "pycore_pystate.h"       // _PyThreadState_GET()
 #include "pycore_tuple.h"         // _PyTuple_ITEMS()
+#include "pycore_unicodeobject.h" // _PyUnicode_Equal()
 
 
 /*[clinic input]
@@ -39,41 +40,43 @@ descr_name(PyDescrObject *descr)
 }
 
 static PyObject *
-descr_repr(PyDescrObject *descr, const char *format)
+method_repr(PyObject *self)
 {
-    PyObject *name = NULL;
-    if (descr->d_name != NULL && PyUnicode_Check(descr->d_name))
-        name = descr->d_name;
+    PyDescrObject *descr = (PyDescrObject *)self;
+    PyObject *objclass = (PyObject *)descr->d_type;
+    if (objclass == NULL) {
+        return PyUnicode_FromFormat("?.%V", descr_name(descr), "?");
+    }
 
-    return PyUnicode_FromFormat(format, name, "?", descr->d_type->tp_name);
+    return PyUnicode_FromFormat("%R.%V", objclass, descr_name(descr), "?");
 }
 
 static PyObject *
-method_repr(PyObject *descr)
+slot_repr(PyObject *self, const char *name)
 {
-    return descr_repr((PyDescrObject *)descr,
-                      "<method '%V' of '%s' objects>");
+    PyDescrObject *descr = (PyDescrObject *)self;
+    PyObject *objclass = (PyObject *)descr->d_type;
+    PyObject *tpname = NULL;
+    if (objclass != NULL) {
+        tpname = PyObject_Repr(objclass);
+        if (tpname == NULL) {
+            return NULL;
+        }
+    }
+    return PyUnicode_FromFormat("<%s %V.%V>", name,
+                                tpname, "?", descr_name(descr), "?");
 }
 
 static PyObject *
-member_repr(PyObject *descr)
+member_repr(PyObject *self)
 {
-    return descr_repr((PyDescrObject *)descr,
-                      "<member '%V' of '%s' objects>");
+    return slot_repr(self, "member slot");
 }
 
 static PyObject *
-getset_repr(PyObject *descr)
+getset_repr(PyObject *self)
 {
-    return descr_repr((PyDescrObject *)descr,
-                      "<attribute '%V' of '%s' objects>");
-}
-
-static PyObject *
-wrapperdescr_repr(PyObject *descr)
-{
-    return descr_repr((PyDescrObject *)descr,
-                      "<slot wrapper '%V' of '%s' objects>");
+    return slot_repr(self, "attribute slot");
 }
 
 static int
@@ -875,7 +878,7 @@ PyTypeObject PyWrapperDescr_Type = {
     0,                                          /* tp_getattr */
     0,                                          /* tp_setattr */
     0,                                          /* tp_as_async */
-    wrapperdescr_repr,                          /* tp_repr */
+    method_repr,                                /* tp_repr */
     0,                                          /* tp_as_number */
     0,                                          /* tp_as_sequence */
     0,                                          /* tp_as_mapping */
@@ -1361,10 +1364,24 @@ static PyObject *
 wrapper_repr(PyObject *self)
 {
     wrapperobject *wp = (wrapperobject *)self;
-    return PyUnicode_FromFormat("<method-wrapper '%s' of %s object at %p>",
-                               wp->descr->d_base->name,
-                               Py_TYPE(wp->self)->tp_name,
-                               wp->self);
+    const char *name = wp->descr->d_base->name;
+
+    if (PyModule_Check(wp->self)) {
+        PyObject *mod = ((PyModuleObject *)wp->self)->md_name;
+        if (mod && (_PyUnicode_Equal(mod, &_Py_ID(builtins)) ||
+            _PyUnicode_Equal(mod, &_Py_ID(__main__))))
+        {
+            return PyUnicode_FromString(name);
+        }
+        return PyUnicode_FromFormat("%V.%s", mod, "?", name);
+    }
+
+    return PyUnicode_FromFormat("%R%s.%s",
+                                wp->self,
+                                PyLong_Check(wp->self)
+                                    && Py_TYPE(wp->self)->tp_repr == PyLong_Type.tp_repr
+                                ? " " : "",
+                                name);
 }
 
 static PyObject *
@@ -1630,6 +1647,76 @@ static PyMethodDef property_methods[] = {
     {0}
 };
 
+
+static PyObject *
+property_repr(PyObject *self)
+{
+    _PyUnicodeWriter writer;
+    int res, comma = 0;
+
+    propertyobject *prop = (propertyobject *)self;
+    PyObject *objrepr = PyObject_Repr((PyObject *)Py_TYPE(self));
+    if (objrepr == NULL) {
+        return NULL;
+    }
+
+    _PyUnicodeWriter_Init(&writer);
+    writer.min_length = PyUnicode_GET_LENGTH(objrepr) + 2;
+    writer.overallocate = 1;
+
+    res = _PyUnicodeWriter_WriteStr(&writer, objrepr);
+    Py_DECREF(objrepr);
+    if (res == -1) {
+        goto error;
+    }
+
+    if (_PyUnicodeWriter_WriteChar(&writer, '(') < 0) {
+        goto error;
+    }
+
+#define WRITE_FIELD(NAME, FIELD) \
+    if (prop->FIELD) { \
+        if (comma) { \
+            if (_PyUnicodeWriter_WriteASCIIString(&writer, ", ", 2) < 0) { \
+                goto error; \
+            } \
+        } \
+        else { \
+            comma = 1; \
+        } \
+        if (_PyUnicodeWriter_WriteASCIIString(&writer, NAME, \
+                                              sizeof(NAME) - 1) < 0) { \
+            goto error; \
+        } \
+        if (_PyUnicodeWriter_WriteChar(&writer, '=') < 0) { \
+            goto error; \
+        } \
+        objrepr = PyObject_Repr(prop->FIELD); \
+        if (objrepr == NULL) { \
+            goto error; \
+        } \
+        res = _PyUnicodeWriter_WriteStr(&writer, objrepr); \
+        Py_DECREF(objrepr); \
+        if (res == -1) { \
+            goto error; \
+        } \
+    }
+
+    WRITE_FIELD("fget", prop_get)
+    WRITE_FIELD("fset", prop_set)
+    WRITE_FIELD("fdel", prop_del)
+    WRITE_FIELD("doc", prop_doc)
+
+    if (_PyUnicodeWriter_WriteChar(&writer, ')') < 0) {
+        goto error;
+    }
+
+    return _PyUnicodeWriter_Finish(&writer);
+
+  error:
+    _PyUnicodeWriter_Dealloc(&writer);
+    return NULL;
+}
 
 static void
 property_dealloc(PyObject *self)
@@ -2050,7 +2137,7 @@ PyTypeObject PyProperty_Type = {
     0,                                          /* tp_getattr */
     0,                                          /* tp_setattr */
     0,                                          /* tp_as_async */
-    0,                                          /* tp_repr */
+    property_repr,                              /* tp_repr */
     0,                                          /* tp_as_number */
     0,                                          /* tp_as_sequence */
     0,                                          /* tp_as_mapping */

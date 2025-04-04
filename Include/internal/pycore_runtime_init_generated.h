@@ -550,7 +550,6 @@ extern "C" {
     INIT_STR(dbl_open_br, "{{"), \
     INIT_STR(dbl_percent, "%%"), \
     INIT_STR(defaults, ".defaults"), \
-    INIT_STR(dot_locals, ".<locals>"), \
     INIT_STR(empty, ""), \
     INIT_STR(format, ".format"), \
     INIT_STR(generic_base, ".generic_base"), \

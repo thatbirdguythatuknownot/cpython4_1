@@ -7,6 +7,7 @@
 #include "pycore_object.h"
 #include "pycore_pyerrors.h"
 #include "pycore_pystate.h"       // _PyThreadState_GET()
+#include "pycore_unicodeobject.h" // _PyUnicode_Equal()
 
 
 /* undefine macro trampoline to PyCFunction_NewEx */
@@ -290,15 +291,26 @@ static PyObject *
 meth_repr(PyObject *self)
 {
     PyCFunctionObject *m = _PyCFunctionObject_CAST(self);
-    if (m->m_self == NULL || PyModule_Check(m->m_self)) {
-        return PyUnicode_FromFormat("<built-in function %s>",
-                                    m->m_ml->ml_name);
+    const char *name = m->m_ml->ml_name;
+
+    if (m->m_self == NULL)
+        return PyUnicode_FromString(name);
+    if (PyModule_Check(m->m_self)) {
+        PyObject *mod = ((PyModuleObject *)m->m_self)->md_name;
+        if (mod && (_PyUnicode_Equal(mod, &_Py_ID(builtins)) ||
+            _PyUnicode_Equal(mod, &_Py_ID(__main__))))
+        {
+            return PyUnicode_FromString(name);
+        }
+        return PyUnicode_FromFormat("%V.%s", mod, "?", name);
     }
 
-    return PyUnicode_FromFormat("<built-in method %s of %s object at %p>",
-                                m->m_ml->ml_name,
-                                Py_TYPE(m->m_self)->tp_name,
-                                m->m_self);
+    return PyUnicode_FromFormat("%R%s.%s",
+                                m->m_self,
+                                PyLong_Check(m->m_self)
+                                    && Py_TYPE(m->m_self)->tp_repr == PyLong_Type.tp_repr
+                                ? " " : "",
+                                name);
 }
 
 static PyObject *
