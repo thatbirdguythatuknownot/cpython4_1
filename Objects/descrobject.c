@@ -1688,12 +1688,19 @@ property_repr(PyObject *self)
                                               sizeof(NAME) - 1) < 0) { \
             goto error; \
         } \
-        if (_PyUnicodeWriter_WriteChar(&writer, '=') < 0) { \
-            goto error; \
-        } \
         objrepr = PyObject_Repr(prop->FIELD); \
         if (objrepr == NULL) { \
             goto error; \
+        } \
+        if (PyUnicode_FindChar(objrepr, ' ', 0, PY_SSIZE_T_MAX, 1) >= 0) { \
+            if (_PyUnicodeWriter_WriteASCIIString(&writer, " = ", 3) < 0) { \
+                goto error; \
+            } \
+        } \
+        else { \
+            if (_PyUnicodeWriter_WriteChar(&writer, '=') < 0) { \
+                goto error; \
+            } \
         } \
         res = _PyUnicodeWriter_WriteStr(&writer, objrepr); \
         Py_DECREF(objrepr); \
