@@ -1120,7 +1120,7 @@ remove_redundant_nops_and_pairs(basicblock *entryblock)
         cfg_instr *instr = NULL;
         for (basicblock *b = entryblock; b != NULL; b = b->b_next) {
             RETURN_IF_ERROR(basicblock_remove_redundant_nops(b));
-            if (IS_LABEL(b->b_label)) {
+            if (b->b_iused && IS_LABEL(b->b_label)) {
                 /* this block is a jump target, forget instr */
                 instr = NULL;
             }
@@ -2165,7 +2165,22 @@ basicblock_optimize_load_const(PyObject *const_cache, basicblock *bb, PyObject *
         if (opcode != LOAD_CONST && opcode != LOAD_SMALL_INT) {
             continue;
         }
-        int nextop = i+1 < bb->b_iused ? bb->b_instr[i+1].i_opcode : 0;
+        cfg_instr *nextinstr;
+        int ninstr_left;
+        if (i+1 < bb->b_iused) {
+            nextinstr = &bb->b_instr[i + 1];
+            ninstr_left = bb->b_iused - (i + 1) - 1;
+        }
+        else if (bb->b_next) {
+            assert(bb->b_next->b_iused > 0);
+            nextinstr = &bb->b_next->b_instr[0];
+            ninstr_left = bb->b_next->b_iused - 1;
+        }
+        else {
+            nextinstr = NULL;
+            ninstr_left = 0;
+        }
+        int nextop = nextinstr ? nextinstr->i_opcode : 0;
         switch(nextop) {
             case POP_JUMP_IF_FALSE:
             case POP_JUMP_IF_TRUE:
@@ -2188,10 +2203,10 @@ basicblock_optimize_load_const(PyObject *const_cache, basicblock *bb, PyObject *
                 }
                 int jump_if_true = (nextop == POP_JUMP_IF_TRUE || nextop == JUMP_IF_TRUE);
                 if (is_true == jump_if_true) {
-                    bb->b_instr[i+1].i_opcode = JUMP;
+                    nextinstr->i_opcode = JUMP;
                 }
                 else {
-                    INSTR_SET_OP0(&bb->b_instr[i + 1], NOP);
+                    INSTR_SET_OP0(nextinstr, NOP);
                 }
                 break;
             }
@@ -2215,18 +2230,18 @@ basicblock_optimize_load_const(PyObject *const_cache, basicblock *bb, PyObject *
                     Py_DECREF(cnt);
                     break;
                 }
-                if (bb->b_iused <= i + 2) {
+                if (ninstr_left < 1) {
                     break;
                 }
-                cfg_instr *is_instr = &bb->b_instr[i + 1];
-                cfg_instr *jump_instr = &bb->b_instr[i + 2];
+                cfg_instr *is_instr = nextinstr;
+                cfg_instr *jump_instr = nextinstr + 1;
                 // Get rid of TO_BOOL regardless:
                 if (jump_instr->i_opcode == TO_BOOL) {
                     INSTR_SET_OP0(jump_instr, NOP);
-                    if (bb->b_iused <= i + 3) {
+                    if (ninstr_left < 2) {
                         break;
                     }
-                    jump_instr = &bb->b_instr[i + 3];
+                    jump_instr = nextinstr + 2;
                 }
                 bool invert = is_instr->i_oparg;
                 if (jump_instr->i_opcode == POP_JUMP_IF_FALSE) {
@@ -2258,7 +2273,7 @@ basicblock_optimize_load_const(PyObject *const_cache, basicblock *bb, PyObject *
                     return ERROR;
                 }
                 INSTR_SET_OP0(inst, NOP);
-                INSTR_SET_OP1(&bb->b_instr[i + 1], LOAD_CONST, index);
+                INSTR_SET_OP1(nextinstr, LOAD_CONST, index);
                 break;
             }
         }
@@ -2526,9 +2541,10 @@ optimize_cfg(cfg_builder *g, PyObject *consts, PyObject *const_cache, int firstl
     for (basicblock *b = g->g_entryblock; b != NULL; b = b->b_next) {
         RETURN_IF_ERROR(optimize_basic_block(const_cache, b, consts));
     }
-    RETURN_IF_ERROR(remove_redundant_nops_and_pairs(g->g_entryblock));
     RETURN_IF_ERROR(remove_unreachable(g->g_entryblock));
     RETURN_IF_ERROR(remove_redundant_nops_and_jumps(g));
+    RETURN_IF_ERROR(remove_redundant_nops_and_pairs(g->g_entryblock));
+    RETURN_IF_ERROR(remove_redundant_nops(g));
     assert(no_redundant_jumps(g));
     return SUCCESS;
 }
